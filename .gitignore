@@ -223,6 +223,8 @@ __marimo__/
 # copilot
 .github
 
-# Agents )
+# Agents
 AGENTS.md
 
+# defunct
+/defunct
