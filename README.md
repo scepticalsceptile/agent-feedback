@@ -110,7 +110,7 @@ To remember the pipeline, note the stages **map directly to the `arun()` paramet
 
 The output of one function flows naturally as the input to the next.
 
-For a full guide to the API, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/README.md).
+For a step-by-step guide, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/getting_started.md).
 
 ## Built to be spammable
 
@@ -226,8 +226,9 @@ Today, `agent-feedback` is stdlib-only. Zero-dependency. We will attempt to keep
 
 ## Further reading
 
-- **Advanced API** — `Runner`, `Request`, callback shapes, controlled failures, and result/history details.
-- **Patterns** — request-specific feedback helpers, middleware, decorators, and observability patterns.
+- [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/getting_started.md) — first successful `arun(...)` loop, extraction, validation, and feedback.
+- [API Reference](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/api_reference.md) — exact signatures, callback shapes, failure semantics, and history/result details.
+- [Patterns](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md) — `Runner` reuse, provider-shaped feedback, decorator recipes, and observability patterns.
 
 ## License
 
