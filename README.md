@@ -7,6 +7,10 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/agent-feedback.svg)](https://pypi.org/project/agent-feedback/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+```bash
+pip install agent-feedback
+```
+
 ```python
 from agent_feedback import RetryableFailure, arun
 
@@ -21,7 +25,7 @@ result = await arun(
     request=messages,
     invoke=llm_invoke,
     validators=[require_tool_call],
-    apply_feedback=lambda feedback, request: request + [
+    apply_feedback=lambda feedback, previous_request: previous_request + [
         {"role": "system", "content": feedback}
     ],
     max_attempts=3,
@@ -90,7 +94,7 @@ The feedback becomes context for the next attempt.
     v
   validators
     |
-    +-------> return None / raise TerminalFailure ---------> done
+    +-------> return None ---------> done
     |
     v
   raise RetryableFailure
@@ -99,90 +103,78 @@ The feedback becomes context for the next attempt.
   apply_feedback
     |
     v
-  request -----------> (back to top)
+  request -------------> (back to top)
 
 ```
 
-The core loop stages map directly to the leading `arun()` parameters, read top-to-bottom:
+To remember the pipeline, note the stages **map directly to the `arun()` parameters, read top-to-bottom**:
 
 1. `request` — The argument or arguments passed to your invocation callable.
-
 2. `invoke` — The callable performing the actual execution/LLM call.
-
 3. `extract` (optional) — Post-processes the raw response into the target shape for validation.
-
 4. `validators` — A list of functions that evaluate the extracted output.
-
 5. `apply_feedback` — Dictates how the feedback transforms the original request for the next attempt.
 
-6. `max_attempts` — The circuit breaker capping total retry attempts.
-
-The output of one function flows naturally as the input to the next. After that,
-`max_attempts` and `on_exhausted_retries` define the loop boundary behavior.
+The output of one function flows naturally as the input to the next.
 
 For a full guide to the API, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/README.md).
 
-## Why not just use Instructor or PydanticAI?
+## Built to be spammable
 
-Those libraries already solve an important problem: **does the model's output conform to my schema?**
-
-`agent-feedback` is concerned with a different layer:
-
-**is this output actually acceptable for my application?**
-
-Instructor and PydanticAI already support retrying when their validation mechanisms fail. The difference is where the retry loop lives: theirs is part of their respective framework abstractions; `agent-feedback` wraps an invocation callable you already have.
-
-So you can use it without them, or alongside them:
+The core loop stays the same even when the SDK does not:
 
 ```python
-import instructor
+from agent_feedback import arun, Request
 
-client = instructor.from_provider("openai/gpt-4o-mini")
-
-result = await arun(
+# Anthropic — Messages API
+await arun(
     request=Request(
-        response_model=UserModel,
-        messages=[{"role": "user", "content": "John is 250 years old"}],
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=messages,
     ),
+    invoke=client.messages.create,
+    validators=[require_tool_call],
+)
+
+# OpenAI — Responses API
+await arun(
+    request=Request(
+        model="gpt-5.5",
+        input=messages,
+    ),
+    invoke=client.responses.create,
+    validators=[require_tool_call],
+)
+
+# LangChain — any BaseChatModel
+await arun(
+    request=messages,
+    invoke=model.ainvoke,
+    validators=[require_tool_call],
+)
+
+# Combine with Instructor
+client = instructor.from_provider("openai/gpt-4o-mini")
+await arun(
+    request=Request( 
+        response_model=UserBaseModel,
+        messages=[{"role": "user", "content": "John is 250 years old"}],
+    ), 
     invoke=client.chat.completions.create,
-    validators=[clarify_user_has_reasonable_age],
-    apply_feedback=...,
+    validators=[user_age_reasonable],
 )
 ```
 
-No framework migration required.
+Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. What doesn't change is the loop around them.
 
-### Why not just a while loop?
-
-```python
-for attempt in range(3):
-    response = await llm_invoke(request)
-
-    try:
-        validate(response)
-        return response
-    except RetryableFailure as e:
-        request = apply_feedback(e.feedback, request)
-
-```
-
-You can. That's essentially what agent-feedback does.
-
-The value isn't hiding a complicated algorithm. It's giving a reusable abstraction to a pattern that tends to grow once you need extraction, multiple validators, structured failures, attempt history, exhaustion handling, and consistent behavior across your application.
-
-If your loop is five lines, write the five-line loop.
-
-If you're writing the same loop repeatedly, use agent-feedback.
-
-## Reuse the loop
-
-If the same invocation, extraction, or feedback behavior is used across a codebase, `Runner` lets you package those defaults:
+When several call sites share the same invocation, extraction, or feedback behavior, `Runner` lets you package those defaults:
 
 ```python
 runner = Runner(
     invoke=model.ainvoke,
     extract=lambda response: response,
-    apply_feedback=lambda feedback, request: request + [
+    apply_feedback=lambda feedback, previous_request: previous_request + [
         {"role": "system", "content": feedback}
     ],
     max_attempts=3,
@@ -194,7 +186,40 @@ result = await runner.arun(
 )
 ```
 
-`Runner` is only a convenience. It delegates to the same execution model as `arun`.
+`Runner` is only a convenience. It delegates to the same execution model as `arun`. There's no adapter layer, so there's almost no integration cost to wrapping *every* call site in your app, not just the risky ones.
+
+1. **Reuse one pipeline everywhere.**
+
+Build it once with `Runner`, then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
+
+2. **Raise `RetryableFailure` from anywhere.**
+
+Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
+
+3. **Use validators as lightweight eval hooks.**
+
+Attach one that records the output and returns `None`, and you can collect pass/fail or quality telemetry at every call site without changing your invocation code.
+
+## Why not just a while loop?
+
+```python
+for attempt in range(3):
+    response = await llm_invoke(request)
+
+    try:
+        validate(response)
+        return response
+    except RetryableFailure as e:
+        request = apply_feedback(e.feedback, request)
+```
+
+You can. That's essentially the core of `agent-feedback`.
+
+The value isn't in hiding a complicated algorithm. It's in providing a reusable abstraction around a pattern that tends to grow as your application needs more: extraction, multiple validators, structured failures, attempt history, exhaustion handling, and consistent retry behavior.
+
+**If a five-line loop is all you need, write the five-line loop.**
+
+**If you're writing the same loop repeatedly, use `agent-feedback`.**
 
 ## Inspecting attempts
 
@@ -216,6 +241,8 @@ result.history
 result.final_failure
 ```
 
+`arun_full(...)` is the same as `arun(...)` but returns a full record instead of just `result.output`.
+
 `AttemptHistory` is an audit trail for advanced validation, retry logic, and observability. It isn't a second orchestration framework.
 
 ## Scope
@@ -227,18 +254,10 @@ v1 is deliberately small:
 - No batch orchestration.
 - No provider-specific adapters in core.
 - No automatic inference about how requests should change.
-- No broad retrying of network, authentication, or programming errors.
-- No default retry of an unchanged request.
 
-The package is a loop around your callable, not another agent framework.
+The package is a loop around your callable, not another agent framework. If you need any of these features, you can either build your own abstractions or raise an issue. The API is designed to be extensible.
 
-## Install
-
-```bash
-pip install agent-feedback
-```
-
-Zero runtime dependencies — stdlib only.
+Today, `agent-feedback` is stdlib-only. Zero-dependency. We will attempt to keep it that way for the foreseeable future.
 
 ## Further reading
 
