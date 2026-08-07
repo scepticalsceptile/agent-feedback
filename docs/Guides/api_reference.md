@@ -378,5 +378,4 @@ Base class for library-defined exceptions.
 - Do not mutate old requests, outputs, or history entries in place.
 - Use `arun(...)` when you only need the final extracted output.
 - Use `arun_full(...)` when you need diagnostics or attempt history.
-- Use `Runner` only after you see repeated loop configuration across call
-  sites.
+- Use `Runner` only after you see repeated loop configuration across call sites.
