@@ -70,8 +70,8 @@ async def _build_next_request(
 
 async def arun_full(
     *,
-    invoke: Callable[..., Any],
     request: Any,
+    invoke: Callable[..., Any],
     extract: Callable[..., Any] = _identity_extract,
     validators: Sequence[Callable[..., Any]] = (),
     apply_feedback: ApplyFeedback | None = None,
@@ -173,13 +173,13 @@ async def arun_full(
 
 async def arun(
     *,
-    invoke: Callable[..., Any],
     request: Any,
+    invoke: Callable[..., Any],
     extract: Callable[..., Any] = _identity_extract,
     validators: Sequence[Callable[..., Any]] = (),
     apply_feedback: ApplyFeedback | None = None,
-    on_exhausted_retries: Literal["raise", "return_last"] = "raise",
     max_attempts: int = 3,
+    on_exhausted_retries: Literal["raise", "return_last"] = "raise",
 ) -> Any:
     """Run the convenience API that returns extracted output or raises."""
 
@@ -215,8 +215,8 @@ class Runner:
     extract: Callable[..., Any]
     validators: tuple[Callable[..., Any], ...]
     apply_feedback: ApplyFeedback | None
-    on_exhausted_retries: Literal["raise", "return_last"]
     max_attempts: int
+    on_exhausted_retries: Literal["raise", "return_last"]
 
     def __init__(
         self,
@@ -225,8 +225,8 @@ class Runner:
         extract: Callable[..., Any] = _identity_extract,
         validators: Sequence[Callable[..., Any]] = (),
         apply_feedback: ApplyFeedback | None = None,
-        on_exhausted_retries: Literal["raise", "return_last"] = "raise",
         max_attempts: int = 3,
+        on_exhausted_retries: Literal["raise", "return_last"] = "raise",
     ) -> None:
         object.__setattr__(self, "invoke", invoke)
         object.__setattr__(self, "extract", extract)
@@ -242,25 +242,25 @@ class Runner:
         extract: Any = _UNSET,
         validators: Any = _UNSET,
         apply_feedback: Any = _UNSET,
-        on_exhausted_retries: Any = _UNSET,
         max_attempts: Any = _UNSET,
+        on_exhausted_retries: Any = _UNSET,
     ) -> Any:
         """Run the convenience API using Runner defaults plus per-call overrides."""
 
         return await arun(
-            invoke=self.invoke,
             request=request,
+            invoke=self.invoke,
             extract=_resolve_runner_override(extract, self.extract),
             validators=_resolve_runner_override(validators, self.validators),
             apply_feedback=_resolve_runner_override(
                 apply_feedback,
                 self.apply_feedback,
             ),
+            max_attempts=_resolve_runner_override(max_attempts, self.max_attempts),
             on_exhausted_retries=_resolve_runner_override(
                 on_exhausted_retries,
                 self.on_exhausted_retries,
             ),
-            max_attempts=_resolve_runner_override(max_attempts, self.max_attempts),
         )
 
     async def arun_full(

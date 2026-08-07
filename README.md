@@ -1,6 +1,11 @@
 # agent-feedback
 
-## Tell your agent what it did wrong, and let it try again
+> **Tell your agent what it did wrong in less than 10 lines.**
+> A zero-dependency, framework-agnostic Python harness for LLM application validation and stateful feedback retries.
+
+[![PyPI version](https://img.shields.io/pypi/v/agent-feedback.svg)](https://pypi.org/project/agent-feedback/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/agent-feedback.svg)](https://pypi.org/project/agent-feedback/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ```python
 from agent_feedback import RetryableFailure, arun
@@ -13,8 +18,8 @@ def require_tool_call(response):
         )
 
 result = await arun(
-    invoke=model.invoke,
     request=messages,
+    invoke=llm_invoke,
     validators=[require_tool_call],
     apply_feedback=lambda feedback, request: request + [
         {"role": "system", "content": feedback}
@@ -25,13 +30,20 @@ result = await arun(
 
 That's the whole idea: **invoke, inspect, give feedback, retry.**
 
-`agent-feedback` is a small, framework-agnostic feedback loop around **any** LLM invocation callable.
+`agent-feedback` is a small, framework-agnostic feedback loop around **any** LLM invocation callable - that `llm_invoke` is YOUR invokable.
 
-It doesn't replace your model SDK or agent framework, and it doesn't assume that requests are messages, responses are strings, or validation is schema-based.
+It doesn't:
+
+- Replace your model SDK or agent framework
+- Assume requests are message lists
+- Assume responses are strings
+- Force feedback to be appended to a prompt
+
+You define those shapes; the harness just runs the loop.
 
 ## Why?
 
-LLM output can be **valid and still be wrong**.
+Because LLM output can be **valid and still be wrong**.
 
 A schema can tell you that this is a valid tool call:
 
@@ -76,9 +88,9 @@ The feedback becomes context for the next attempt.
   extract (optional)
     |
     v
-  validate
+  validators
     |
-    +-------> return None -------------> done
+    +-------> return None / raise TerminalFailure ---------> done
     |
     v
   raise RetryableFailure
@@ -91,11 +103,24 @@ The feedback becomes context for the next attempt.
 
 ```
 
-The important part is what the loop **doesn't** assume.
+The core loop stages map directly to the leading `arun()` parameters, read top-to-bottom:
 
-Terminal failures stop immediately instead of looping.
+1. `request` — The argument or arguments passed to your invocation callable.
 
-Your request might be a string, a message list, a request object, or something entirely specific to your application. Your response might be a provider object, a parsed model, or a wrapper around either. You define `invoke`, optional `extract`, `validators`, and `apply_feedback`; the harness just runs the loop.
+2. `invoke` — The callable performing the actual execution/LLM call.
+
+3. `extract` (optional) — Post-processes the raw response into the target shape for validation.
+
+4. `validators` — A list of functions that evaluate the extracted output.
+
+5. `apply_feedback` — Dictates how the feedback transforms the original request for the next attempt.
+
+6. `max_attempts` — The circuit breaker capping total retry attempts.
+
+The output of one function flows naturally as the input to the next. After that,
+`max_attempts` and `on_exhausted_retries` define the loop boundary behavior.
+
+For a full guide to the API, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/README.md).
 
 ## Why not just use Instructor or PydanticAI?
 
@@ -107,77 +132,47 @@ Those libraries already solve an important problem: **does the model's output co
 
 Instructor and PydanticAI already support retrying when their validation mechanisms fail. The difference is where the retry loop lives: theirs is part of their respective framework abstractions; `agent-feedback` wraps an invocation callable you already have.
 
-So you can use it alongside them, or without them.
+So you can use it without them, or alongside them:
 
 ```python
+import instructor
+
+client = instructor.from_provider("openai/gpt-4o-mini")
+
 result = await arun(
-    invoke=agent.run,
-    request=prompt,
-    validators=[check_business_rules],
+    request=Request(
+        response_model=UserModel,
+        messages=[{"role": "user", "content": "John is 250 years old"}],
+    ),
+    invoke=client.chat.completions.create,
+    validators=[clarify_user_has_reasonable_age],
     apply_feedback=...,
 )
 ```
 
 No framework migration required.
 
-## Four things
-
-The core API deliberately stays small. It is really just four hooks:
+### Why not just a while loop?
 
 ```python
-result = await arun(
-    invoke=model.ainvoke,  # perform the actual call
-    request=messages,
-    extract=lambda response: response.output_text,  # optional: pick what you validate
-    validators=[check_business_rules],  # accept or reject the extracted output
-    apply_feedback=append_retry_feedback,  # build the next request from feedback
-)
+for attempt in range(3):
+    response = await llm_invoke(request)
+
+    try:
+        validate(response)
+        return response
+    except RetryableFailure as e:
+        request = apply_feedback(e.feedback, request)
+
 ```
 
-`extract` is optional; omit it if the raw response is already the thing you want to validate.
+You can. That's essentially what agent-feedback does.
 
-Validators return `None` on success. A `RetryableFailure` asks for another attempt; a `TerminalFailure` stops immediately.
+The value isn't hiding a complicated algorithm. It's giving a reusable abstraction to a pattern that tends to grow once you need extraction, multiple validators, structured failures, attempt history, exhaustion handling, and consistent behavior across your application.
 
-`apply_feedback` is intentionally **not universal**. `agent-feedback` doesn't assume that every request is an appendable message list.
+If your loop is five lines, write the five-line loop.
 
-For a different request shape, write a different function.
-
-```python
-apply_feedback=lambda feedback, request: {
-    **request,
-    "prompt": f"{request['prompt']}\n\n{feedback}",
-}
-```
-
-The package provides narrow helpers for common request families, but they are conveniences rather than a universal request adapter.
-
-## Controlled failure
-
-There are two kinds of deliberate failure:
-
-```python
-RetryableFailure(...)
-TerminalFailure(...)
-```
-
-A `RetryableFailure` means:
-
-> This attempt isn't acceptable. Here's what the model should know before trying again.
-
-```python
-raise RetryableFailure(
-    "The selected destination was invalid.",
-    feedback="Choose a destination different from the origin.",
-)
-```
-
-A `TerminalFailure` means:
-
-> Stop. Don't ask the model to try again.
-
-There is no default "retry the same request" behavior. If a failure is retryable, you must define how its feedback changes the next request.
-
-Unexpected exceptions propagate normally.
+If you're writing the same loop repeatedly, use agent-feedback.
 
 ## Reuse the loop
 
@@ -227,13 +222,13 @@ result.final_failure
 
 v1 is deliberately small:
 
-* Async-first.
-* No streaming support.
-* No batch orchestration.
-* No provider-specific adapters in core.
-* No automatic inference about how requests should change.
-* No broad retrying of network, authentication, or programming errors.
-* No default retry of an unchanged request.
+- Async-first.
+- No streaming support.
+- No batch orchestration.
+- No provider-specific adapters in core.
+- No automatic inference about how requests should change.
+- No broad retrying of network, authentication, or programming errors.
+- No default retry of an unchanged request.
 
 The package is a loop around your callable, not another agent framework.
 
@@ -247,8 +242,8 @@ Zero runtime dependencies — stdlib only.
 
 ## Further reading
 
-* **Advanced API** — `Runner`, `Request`, callback shapes, controlled failures, and result/history details.
-* **Patterns** — request-specific feedback helpers, middleware, decorators, and observability patterns.
+- **Advanced API** — `Runner`, `Request`, callback shapes, controlled failures, and result/history details.
+- **Patterns** — request-specific feedback helpers, middleware, decorators, and observability patterns.
 
 ## License
 

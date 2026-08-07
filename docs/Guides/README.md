@@ -22,8 +22,8 @@ from agent_feedback import arun
 
 
 result = await arun(
-	invoke=model.ainvoke,
 	request="Say hello in one short sentence.",
+	invoke=model.ainvoke,
 )
 ```
 
@@ -34,8 +34,8 @@ from agent_feedback import arun
 
 
 result = await arun(
-	invoke=model.ainvoke,
 	request="Say hello in one short sentence.",
+	invoke=model.ainvoke,
 	extract=lambda response: response.output_text,
 )
 ```
@@ -103,8 +103,8 @@ def must_start_with_hello(text: str) -> None:
 
 
 result = await arun(
-	invoke=model.ainvoke,
 	request="Greet me in one short sentence.",
+	invoke=model.ainvoke,
 	extract=lambda response: response.output_text,
 	validators=[must_start_with_hello],
 	apply_feedback=lambda feedback, request: f"{request}\n\n{feedback}",
@@ -158,8 +158,8 @@ from agent_feedback import arun_full
 
 
 run = await arun_full(
-	invoke=model.ainvoke,
 	request="Say hello in one short sentence.",
+	invoke=model.ainvoke,
 	extract=lambda response: response.output_text,
 )
 
@@ -226,11 +226,11 @@ from agent_feedback import Request, arun
 
 
 result = await arun(
-	invoke=client.responses.create,
 	request=Request(
 		input="Say hello.",
 		model="gpt-5.5",
 	),
+	invoke=client.responses.create,
 	extract=lambda response: response.output_text,
 )
 ```
