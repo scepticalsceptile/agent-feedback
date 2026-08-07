@@ -1,36 +1,241 @@
 # agent-feedback
 
-**Tell your agent what it did wrong, and let it try again — in about 10 lines, with the `invoke` you already have.**
-
-[![PyPI](https://img.shields.io/pypi/v/agent-feedback)](https://pypi.org/project/agent-feedback/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
+## Tell your agent what it did wrong, and let it try again
 
 ```python
-from agent_feedback import RetryableFailure, arun, append_feedback_message
-
+from agent_feedback import RetryableFailure, arun
 
 def require_tool_call(response):
     if not response.tool_calls:
         raise RetryableFailure(
-            "Model answered in prose instead of calling a tool.",
-            feedback="You must call a tool for this task — don't respond in plain text.",
+            "Model did not call a tool.",
+            feedback="You must call a tool for this task.",
         )
 
-
 result = await arun(
-    invoke=model.ainvoke,
+    invoke=model.invoke,
     request=messages,
     validators=[require_tool_call],
-    apply_feedback=append_feedback_message(role="user"),
+    apply_feedback=lambda feedback, request: request + [
+        {"role": "system", "content": feedback}
+    ],
     max_attempts=3,
 )
 ```
 
-That's the whole library: call the model, check the result, and if it's not
-good enough, tell it why and try again. No new mental model, no subclassing,
-no schema DSL — `model.ainvoke` above is *your* existing invoke call,
-untouched.
+That's the whole idea: **invoke, inspect, give feedback, retry.**
+
+`agent-feedback` is a small, framework-agnostic feedback loop around **any** LLM invocation callable.
+
+It doesn't replace your model SDK or agent framework, and it doesn't assume that requests are messages, responses are strings, or validation is schema-based.
+
+## Why?
+
+LLM output can be **valid and still be wrong**.
+
+A schema can tell you that this is a valid tool call:
+
+```python
+{
+    "origin": "NYC",
+    "destination": "NYC",
+}
+```
+
+It can't tell you that the user probably didn't mean to search for a flight from a city to itself.
+
+That's application-level validation:
+
+```python
+def validate_flight_search(tool_call):
+    if tool_call.name != "search_flights":
+        raise RetryableFailure(
+            "Wrong tool selected.",
+            feedback="Use the search_flights tool for this request.",
+        )
+
+    if tool_call.input["origin"] == tool_call.input["destination"]:
+        raise RetryableFailure(
+            "Origin and destination are identical.",
+            feedback="Choose a destination different from the origin.",
+        )
+```
+
+The feedback becomes context for the next attempt.
+
+## The mental model
+
+```text
+
+ request
+    |
+    v
+  invoke
+    |
+    v
+  extract (optional)
+    |
+    v
+  validate
+    |
+    +-------> return None -------------> done
+    |
+    v
+  raise RetryableFailure
+    |
+    v
+  apply_feedback
+    |
+    v
+  request -----------> (back to top)
+
+```
+
+The important part is what the loop **doesn't** assume.
+
+Terminal failures stop immediately instead of looping.
+
+Your request might be a string, a message list, a request object, or something entirely specific to your application. Your response might be a provider object, a parsed model, or a wrapper around either. You define `invoke`, optional `extract`, `validators`, and `apply_feedback`; the harness just runs the loop.
+
+## Why not just use Instructor or PydanticAI?
+
+Those libraries already solve an important problem: **does the model's output conform to my schema?**
+
+`agent-feedback` is concerned with a different layer:
+
+**is this output actually acceptable for my application?**
+
+Instructor and PydanticAI already support retrying when their validation mechanisms fail. The difference is where the retry loop lives: theirs is part of their respective framework abstractions; `agent-feedback` wraps an invocation callable you already have.
+
+So you can use it alongside them, or without them.
+
+```python
+result = await arun(
+    invoke=agent.run,
+    request=prompt,
+    validators=[check_business_rules],
+    apply_feedback=...,
+)
+```
+
+No framework migration required.
+
+## Four things
+
+The core API deliberately stays small. It is really just four hooks:
+
+```python
+result = await arun(
+    invoke=model.ainvoke,  # perform the actual call
+    request=messages,
+    extract=lambda response: response.output_text,  # optional: pick what you validate
+    validators=[check_business_rules],  # accept or reject the extracted output
+    apply_feedback=append_retry_feedback,  # build the next request from feedback
+)
+```
+
+`extract` is optional; omit it if the raw response is already the thing you want to validate.
+
+Validators return `None` on success. A `RetryableFailure` asks for another attempt; a `TerminalFailure` stops immediately.
+
+`apply_feedback` is intentionally **not universal**. `agent-feedback` doesn't assume that every request is an appendable message list.
+
+For a different request shape, write a different function.
+
+```python
+apply_feedback=lambda feedback, request: {
+    **request,
+    "prompt": f"{request['prompt']}\n\n{feedback}",
+}
+```
+
+The package provides narrow helpers for common request families, but they are conveniences rather than a universal request adapter.
+
+## Controlled failure
+
+There are two kinds of deliberate failure:
+
+```python
+RetryableFailure(...)
+TerminalFailure(...)
+```
+
+A `RetryableFailure` means:
+
+> This attempt isn't acceptable. Here's what the model should know before trying again.
+
+```python
+raise RetryableFailure(
+    "The selected destination was invalid.",
+    feedback="Choose a destination different from the origin.",
+)
+```
+
+A `TerminalFailure` means:
+
+> Stop. Don't ask the model to try again.
+
+There is no default "retry the same request" behavior. If a failure is retryable, you must define how its feedback changes the next request.
+
+Unexpected exceptions propagate normally.
+
+## Reuse the loop
+
+If the same invocation, extraction, or feedback behavior is used across a codebase, `Runner` lets you package those defaults:
+
+```python
+runner = Runner(
+    invoke=model.ainvoke,
+    extract=lambda response: response,
+    apply_feedback=lambda feedback, request: request + [
+        {"role": "system", "content": feedback}
+    ],
+    max_attempts=3,
+)
+
+result = await runner.arun(
+    request=messages,
+    validators=[require_tool_call],
+)
+```
+
+`Runner` is only a convenience. It delegates to the same execution model as `arun`.
+
+## Inspecting attempts
+
+Most calls only need the final output:
+
+```python
+result = await arun(...)
+```
+
+When you need diagnostics or the full attempt history:
+
+```python
+result = await arun_full(...)
+
+result.output
+result.raw_output
+result.last_request
+result.history
+result.final_failure
+```
+
+`AttemptHistory` is an audit trail for advanced validation, retry logic, and observability. It isn't a second orchestration framework.
+
+## Scope
+
+v1 is deliberately small:
+
+* Async-first.
+* No streaming support.
+* No batch orchestration.
+* No provider-specific adapters in core.
+* No automatic inference about how requests should change.
+* No broad retrying of network, authentication, or programming errors.
+* No default retry of an unchanged request.
+
+The package is a loop around your callable, not another agent framework.
 
 ## Install
 
@@ -40,157 +245,10 @@ pip install agent-feedback
 
 Zero runtime dependencies — stdlib only.
 
-## The mental model
-
-```
-request
-   │
-   ▼
-invoke(request) ────────► raw response
-   │
-   ▼
-extract(response, ...) ──► output
-   │
-   ├── valid ────────────► return output
-   │
-   └── invalid ──────────► raise RetryableFailure(feedback=...)
-                               │
-                               ▼
-                   apply_feedback(feedback, request, ...) ─► next request
-                               │
-                               ▼
-                             retry
-```
-
-Most SDKs don't hand you "the answer" directly — OpenAI's Responses API
-buries it in `response.output_text`, Anthropic's Messages API buries it in a
-list of content blocks. `extract` is where you dig it out. If the raw
-response is already the thing you want to check (like `response.tool_calls`
-above), skip `extract` entirely — it defaults to returning the response
-as-is.
-
-## Why not just use Instructor or PydanticAI?
-
-Those libraries answer a different question: *does the model's output match
-my schema?* Both already retry when it doesn't — Instructor re-asks when a
-Pydantic field validator raises, PydanticAI re-asks when you raise
-`ModelRetry`. If your problem is shape, use them.
-
-`agent_feedback` answers a different question: *is this output actually
-acceptable* — which schema validation can't tell you. This tool call is
-perfectly valid: correct types, every required field, passes any Pydantic
-model you'd write for it. It's still wrong.
-
-```python
-def valid_flight_search(tool_call):
-    origin = tool_call.input["origin"]
-    destination = tool_call.input["destination"]
-    if origin == destination:
-        raise RetryableFailure(
-            "Origin and destination were identical.",
-            feedback=(
-                f"You searched a flight from {origin} to {destination} — "
-                "that's the same city. Pick a real destination."
-            ),
-        )
-```
-
-Nothing about `{"origin": "NYC", "destination": "NYC"}` fails a schema. It
-fails *your business logic*, and only you know what that is.
-
-This isn't a replacement for Instructor or PydanticAI — it's a layer that
-doesn't care whether you're using them. `invoke=` can just as easily be a
-PydanticAI agent's `.run` or an Instructor-wrapped client; `agent_feedback`
-only cares that it's a callable.
-
-## Built to be spammable
-
-There's no adapter step, so there's roughly zero cost to wrapping *every*
-call site in your app, not just the risky ones. Same loop, any SDK:
-
-```python
-# Anthropic — Messages API
-await arun(
-    invoke=client.messages.create,
-    request=Request(model="claude-sonnet-4-6", max_tokens=1024, messages=messages),
-    validators=[require_tool_call],
-)
-
-# OpenAI — Responses API
-await arun(
-    invoke=client.responses.create,
-    request=Request(model="gpt-5.5", input=messages),
-    validators=[require_tool_call],
-)
-
-# LangChain — any BaseChatModel
-await arun(
-    invoke=model.ainvoke,
-    request=messages,
-    validators=[require_tool_call],
-)
-```
-
-(Your extractor and validator naturally adapt to whatever shape each SDK
-hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`,
-whatever. What doesn't change is the loop around them.)
-
-That cheapness compounds:
-
-- **Reuse one pipeline everywhere.** Build it once with `Runner`, call it
-  from every site that shares the same `invoke` / `extract` / `apply_feedback`.
-- **Raise `RetryableFailure` from anywhere**, not just validators — inside
-  `invoke` itself if a provider call throws, inside `extract` if parsing
-  fails. Same loop catches it.
-- **Validators are free evals.** Attach one that just logs and returns
-  `None` — you get pass/fail telemetry on every call site for nothing.
-
-And because `RetryableFailure` is just an exception, you can go one step
-further and make *any* function retryable with a decorator:
-
-```python
-def retryable(fn):
-    async def wrapped(*args, **kwargs):
-        try:
-            return await fn(*args, **kwargs)
-        except Exception as exc:
-            raise RetryableFailure(str(exc), feedback=str(exc)) from exc
-    return wrapped
-
-
-result = await arun(invoke=retryable(some_flaky_function), request=payload)
-```
-
-Now anything that throws feeds the model its own error message and tries
-again.
-
-## Scope
-
-- Async-first. A sync wrapper may come later — not in v1.
-- No streaming support — validating mid-stream is a different design problem.
-- No batch orchestration, no provider-specific adapters shipped in core.
-- No default "retry the same request" behavior — you always say what changes.
-- Unexpected exceptions (network errors, auth failures, bugs) propagate
-  as-is. Wrap them yourself if you want them treated as retryable — see the
-  decorator above.
-- `AttemptHistory` is a read-only audit trail, not a lifecycle framework.
-
 ## Further reading
 
-[`ADVANCED.md`](./ADVANCED.md) covers: the two failure types in depth, the
-`Runner` object, `Request(...)` internals, typing your callbacks, the full
-callback-shape reference, and the built-in helper families.
-
-## Development
-
-```bash
-uv sync --extra dev
-uv run ruff check .
-uv run mypy src tests
-uv run pytest
-uv build
-uv run twine check dist/*
-```
+* **Advanced API** — `Runner`, `Request`, callback shapes, controlled failures, and result/history details.
+* **Patterns** — request-specific feedback helpers, middleware, decorators, and observability patterns.
 
 ## License
 
