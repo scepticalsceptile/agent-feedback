@@ -112,7 +112,7 @@ The output of one function flows naturally as the input to the next.
 
 For a step-by-step guide, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/getting_started.md).
 
-## Built to be spammable
+## Built to be spammable, no matter your existing SDK
 
 There's no adapter layer, so there's **almost no integration cost to wrapping every invoke() callsite in your app**, not just the risky ones.
 
