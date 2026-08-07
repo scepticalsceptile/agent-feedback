@@ -114,7 +114,9 @@ For a step-by-step guide, see [Getting Started](https://github.com/scepticalscep
 
 ## Built to be spammable
 
-The core loop stays the same even when the SDK does not:
+There's no adapter layer, so there's **almost no integration cost to wrapping every invoke() callsite in your app**, not just the risky ones.
+
+Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. The core loop stays the same even when the SDK does not:
 
 ```python
 from agent_feedback import arun, Request
@@ -161,9 +163,7 @@ await arun(
 
 > *Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`.*
 
-Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. What doesn't change is the loop around them.
-
-There's no adapter layer, so there's **almost no integration cost to wrapping every invoke() callsite in your app**, not just the risky ones.
+This cheapness compounds:
 
 - **Reuse one pipeline everywhere.** Build it once with [Runner](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#reuse-one-pipeline-with-runner), then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
 - **Raise `RetryableFailure` from anywhere.** Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
