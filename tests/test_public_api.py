@@ -12,6 +12,7 @@ def test_package_exposes_version() -> None:
 def test_package_exports_public_symbols() -> None:
 	assert hasattr(agent_feedback, "Attempt")
 	assert hasattr(agent_feedback, "AttemptHistory")
+	assert hasattr(agent_feedback, "ExhaustedRetriesError")
 	assert hasattr(agent_feedback, "Request")
 	assert hasattr(agent_feedback, "RetryableFailure")
 	assert hasattr(agent_feedback, "Runner")
@@ -23,6 +24,7 @@ def test_package_exports_public_symbols() -> None:
 		"__version__",
 		"Attempt",
 		"AttemptHistory",
+		"ExhaustedRetriesError",
 		"Request",
 		"RetryableFailure",
 		"Runner",

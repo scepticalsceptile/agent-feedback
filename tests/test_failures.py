@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_feedback import RetryableFailure, TerminalFailure
+from agent_feedback import ExhaustedRetriesError, RetryableFailure, TerminalFailure
 
 
 def test_retryable_failure_stores_feedback_and_copies_metadata() -> None:
@@ -34,3 +34,17 @@ def test_terminal_failure_preserves_message() -> None:
 
     assert str(failure) == "stop now"
     assert failure.message == "stop now"
+
+
+def test_exhausted_retries_error_exposes_attempts_and_last_failure() -> None:
+    last_failure = RetryableFailure("still invalid", feedback="retry")
+
+    error = ExhaustedRetriesError(attempts=2, last_failure=last_failure)
+
+    assert (
+        str(error)
+        == "Retries exhausted after 2 attempts. Last retryable failure: still invalid"
+    )
+    assert error.message == str(error)
+    assert error.attempts == 2
+    assert error.last_failure is last_failure

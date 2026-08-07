@@ -25,8 +25,10 @@ Behavior:
 
 - Returns the extracted output on success.
 - Raises `TerminalFailure` immediately if one is raised during the loop.
-- Raises the final `RetryableFailure` when retries are exhausted, unless
+- Raises `ExhaustedRetriesError` when retries are exhausted, unless
   `on_exhausted_retries="return_last"` is set.
+- Chains the final invoke, extract, or validator `RetryableFailure` as the
+  raised error's `__cause__` so the original failure remains inspectable.
 - Returns the final extracted output on retry exhaustion when
   `on_exhausted_retries="return_last"` is set.
 - May return `None` in that exhaustion mode if the final attempt never produced
@@ -260,6 +262,20 @@ Semantics:
 - Signals that the loop should stop immediately.
 - `arun(...)` raises it.
 - `arun_full(...)` returns it inside `RunResult.final_failure`.
+
+### `ExhaustedRetriesError`
+
+```python
+class ExhaustedRetriesError(AgentFeedbackError):
+  def __init__(self, *, attempts: int, last_failure: RetryableFailure) -> None: ...
+```
+
+Semantics:
+
+- Raised by `arun(...)` and `Runner.arun(...)` when the retry budget is exhausted.
+- `attempts` records how many attempts were consumed.
+- `last_failure` exposes the original final `RetryableFailure`.
+- The original `RetryableFailure` is also attached as `__cause__`.
 
 ### Retry-path resolution order
 

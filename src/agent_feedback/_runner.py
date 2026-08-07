@@ -11,7 +11,7 @@ from ._failures import ApplyFeedback, RetryableFailure, TerminalFailure
 from ._history import Attempt, AttemptHistory
 from ._invoke import invoke_request
 from ._result import RunResult
-from .exceptions import MissingApplyFeedbackError
+from .exceptions import ExhaustedRetriesError, MissingApplyFeedbackError
 
 
 class _UnsetType:
@@ -40,6 +40,31 @@ def _resolve_runner_override(override: Any, default: Any) -> Any:
         return default
 
     return override
+
+
+def _exhausted_retry_error(
+    error: RetryableFailure,
+    *,
+    attempts: int,
+) -> ExhaustedRetriesError:
+    """Build a clearer retry exhaustion error for the convenience API."""
+
+    return ExhaustedRetriesError(attempts=attempts, last_failure=error)
+
+
+def _unexpected_exhausted_failure_error(error: Exception | None) -> AssertionError:
+    """Describe an impossible exhausted state with the actual failure value."""
+
+    if error is None:
+        return AssertionError(
+            "arun expected result.final_failure to be RetryableFailure when "
+            "result.exhausted is True, but got None."
+        )
+
+    return AssertionError(
+        "arun expected result.final_failure to be RetryableFailure when "
+        f"result.exhausted is True, but got {type(error).__name__}: {error!r}"
+    )
 
 
 async def _build_next_request(
@@ -199,10 +224,16 @@ async def arun(
         raise result.final_failure
 
     if result.exhausted:
+        if not isinstance(result.final_failure, RetryableFailure):
+            raise _unexpected_exhausted_failure_error(result.final_failure)
+
         if on_exhausted_retries == "return_last":
             return result.output
 
-        raise result.final_failure
+        raise _exhausted_retry_error(
+            result.final_failure,
+            attempts=len(result.history),
+        ) from result.final_failure
 
     raise AssertionError("arun reached an unexpected state.")
 

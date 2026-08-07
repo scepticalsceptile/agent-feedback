@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from agent_feedback import Request, RetryableFailure, Runner, TerminalFailure
+from agent_feedback import (
+    ExhaustedRetriesError,
+    Request,
+    RetryableFailure,
+    Runner,
+    TerminalFailure,
+)
 from agent_feedback.exceptions import MissingApplyFeedbackError
 from tests.fakes import EchoInvokable, FakeRawResponse, SequenceInvokable
 
@@ -164,11 +170,21 @@ async def test_runner_local_on_exhausted_retries_overrides_runner_default() -> N
         max_attempts=2,
     )
 
-    with pytest.raises(RetryableFailure, match="still invalid"):
+    with pytest.raises(ExhaustedRetriesError) as exc_info:
         await runner.arun(
             request="initial-request",
             on_exhausted_retries="raise",
         )
+
+    error = exc_info.value
+    assert (
+        str(error)
+        == "Retries exhausted after 2 attempts. Last retryable failure: still invalid"
+    )
+    assert error.attempts == 2
+    assert error.last_failure.feedback == "retry"
+    assert isinstance(error.__cause__, RetryableFailure)
+    assert str(error.__cause__) == "still invalid"
 
 
 @pytest.mark.asyncio

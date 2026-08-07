@@ -203,7 +203,7 @@ configuration. For reusable multi-call-site setups, see [Reuse one pipeline with
     `last_request`, `history`, `final_failure`, and `exhausted`. See [History and result models](./api_reference.md#history-and-result-models).
 - `TerminalFailure` stops the loop immediately instead of retrying. See [Failure types](./api_reference.md#failure-types).
 - `on_exhausted_retries="return_last"` makes `arun(...)` return the final
-    extracted output instead of raising the last `RetryableFailure`. See [Entry points](./api_reference.md#entry-points).
+    extracted output instead of raising `ExhaustedRetriesError`. See [Entry points](./api_reference.md#entry-points).
 
 ## Next reads
 

@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+import agent_feedback._runner as runner_module
+
 from agent_feedback import (
+    AttemptHistory,
+    ExhaustedRetriesError,
     Request,
     RetryableFailure,
+    RunResult,
     TerminalFailure,
     arun,
     arun_full,
@@ -286,7 +291,7 @@ async def test_arun_raises_final_retryable_failure_on_exhaustion_by_default() ->
     def validator(_output: str) -> None:
         raise RetryableFailure("still invalid", feedback="retry")
 
-    with pytest.raises(RetryableFailure, match="still invalid"):
+    with pytest.raises(ExhaustedRetriesError) as exc_info:
         await arun(
             invoke=invokable,
             request="initial-request",
@@ -294,6 +299,45 @@ async def test_arun_raises_final_retryable_failure_on_exhaustion_by_default() ->
             validators=[validator],
             apply_feedback=lambda feedback, request: f"{request}|{feedback}",
             max_attempts=2,
+        )
+
+    error = exc_info.value
+    assert (
+        str(error)
+        == "Retries exhausted after 2 attempts. Last retryable failure: still invalid"
+    )
+    assert error.attempts == 2
+    assert error.last_failure.feedback == "retry"
+    assert isinstance(error.__cause__, RetryableFailure)
+    assert str(error.__cause__) == "still invalid"
+
+
+@pytest.mark.asyncio
+async def test_arun_reports_actual_failure_for_impossible_exhausted_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_arun_full(**_kwargs: object) -> RunResult:
+        return RunResult(
+            output=None,
+            raw_output=None,
+            last_request="initial-request",
+            history=AttemptHistory(max_attempts=2),
+            final_failure=ValueError("boom"),
+            exhausted=True,
+        )
+
+    monkeypatch.setattr(runner_module, "arun_full", fake_arun_full)
+
+    with pytest.raises(
+        AssertionError,
+        match=(
+            "expected result\\.final_failure to be RetryableFailure.*"
+            "ValueError: ValueError\\('boom'\\)"
+        ),
+    ):
+        await arun(
+            invoke=EchoInvokable(lambda request: FakeRawResponse(text=f"echo:{request}")),
+            request="initial-request",
         )
 
 

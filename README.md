@@ -192,7 +192,7 @@ The value isn't in hiding a complicated algorithm. It's in providing a reusable 
 
 ## Scope
 
-v1 is deliberately small:
+v0.1 is deliberately small:
 
 - Async-first.
 - No streaming support.
