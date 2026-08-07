@@ -22,6 +22,12 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+[project.urls]
+Homepage = "https://github.com/scepticalsceptile/agent-feedback"
+Repository = "https://github.com/scepticalsceptile/agent-feedback"
+Issues = "https://github.com/scepticalsceptile/agent-feedback/issues"
+Documentation = "https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/README.md"
+
 [project.optional-dependencies]
 dev = [
   "build>=1.2",

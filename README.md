@@ -159,33 +159,13 @@ await arun(
 )
 ```
 
-> Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`.
+> *Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`.*
 
 Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. What doesn't change is the loop around them.
 
-When several call sites share the same invocation, extraction, or feedback behavior, `Runner` lets you package those defaults:
+There's no adapter layer, so there's **almost no integration cost to wrapping every invoke() callsite in your app**, not just the risky ones.
 
-```python
-runner = Runner(
-    invoke=model.ainvoke,
-    extract=lambda response: response,
-    apply_feedback=lambda feedback, previous_request: previous_request + [
-        {"role": "system", "content": feedback}
-    ],
-    max_attempts=3,
-)
-
-result = await runner.arun(
-    request=messages,
-    validators=[require_tool_call],
-)
-```
-
-`Runner` is only a convenience. It delegates to the same execution model as `arun`.
-
-There's no adapter layer, so there's *almost no integration cost to wrapping every invoke() callsite in your app*, not just the risky ones.
-
-- **Reuse one pipeline everywhere.** Build it once with `Runner`, then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
+- **Reuse one pipeline everywhere.** Build it once with [Runner](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#reuse-one-pipeline-with-runner), then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
 - **Raise `RetryableFailure` from anywhere.** Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
 - **Use validators as deterministic evals.** A `validator` essentially checks the correctness of an LLM output - which is a free eval. Attach one that records the output and returns `None`, and you can collect pass/fail or quality telemetry at every call site without changing your invocation code.
 
