@@ -36,14 +36,7 @@ That's the whole idea: **invoke, inspect, give feedback, retry.**
 
 `agent-feedback` is a small, framework-agnostic feedback loop around **any** LLM invocation callable - that `llm_invoke` is YOUR invokable.
 
-It doesn't:
-
-- Replace your model SDK or agent framework
-- Assume requests are message lists
-- Assume responses are strings
-- Force feedback to be appended to a prompt
-
-You define those shapes; the harness just runs the loop.
+It doesn't replace your model SDK or agent framework. It doesn't know or care about invocation shapes. You define those shapes; the harness just runs the loop.
 
 ## Why?
 
@@ -155,16 +148,18 @@ await arun(
 )
 
 # Combine with Instructor
-client = instructor.from_provider("openai/gpt-4o-mini")
+instructor_client = instructor.from_provider("openai/gpt-4o-mini")
 await arun(
     request=Request( 
         response_model=UserBaseModel,
         messages=[{"role": "user", "content": "John is 250 years old"}],
     ), 
-    invoke=client.chat.completions.create,
-    validators=[user_age_reasonable],
+    invoke=instructor_client.chat.completions.create,
+    validators=[user_age_reasonable], # your own validator
 )
 ```
+
+> Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`.
 
 Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. What doesn't change is the loop around them.
 
@@ -186,19 +181,13 @@ result = await runner.arun(
 )
 ```
 
-`Runner` is only a convenience. It delegates to the same execution model as `arun`. There's no adapter layer, so there's almost no integration cost to wrapping *every* call site in your app, not just the risky ones.
+`Runner` is only a convenience. It delegates to the same execution model as `arun`.
 
-1. **Reuse one pipeline everywhere.**
+There's no adapter layer, so there's *almost no integration cost to wrapping every invoke() callsite in your app*, not just the risky ones.
 
-Build it once with `Runner`, then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
-
-2. **Raise `RetryableFailure` from anywhere.**
-
-Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
-
-3. **Use validators as lightweight eval hooks.**
-
-Attach one that records the output and returns `None`, and you can collect pass/fail or quality telemetry at every call site without changing your invocation code.
+- **Reuse one pipeline everywhere.** Build it once with `Runner`, then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
+- **Raise `RetryableFailure` from anywhere.** Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
+- **Use validators as deterministic evals.** A `validator` essentially checks the correctness of an LLM output - which is a free eval. Attach one that records the output and returns `None`, and you can collect pass/fail or quality telemetry at every call site without changing your invocation code.
 
 ## Why not just a while loop?
 
@@ -220,30 +209,6 @@ The value isn't in hiding a complicated algorithm. It's in providing a reusable 
 **If a five-line loop is all you need, write the five-line loop.**
 
 **If you're writing the same loop repeatedly, use `agent-feedback`.**
-
-## Inspecting attempts
-
-Most calls only need the final output:
-
-```python
-result = await arun(...)
-```
-
-When you need diagnostics or the full attempt history:
-
-```python
-result = await arun_full(...)
-
-result.output
-result.raw_output
-result.last_request
-result.history
-result.final_failure
-```
-
-`arun_full(...)` is the same as `arun(...)` but returns a full record instead of just `result.output`.
-
-`AttemptHistory` is an audit trail for advanced validation, retry logic, and observability. It isn't a second orchestration framework.
 
 ## Scope
 
