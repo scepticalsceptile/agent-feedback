@@ -1,7 +1,7 @@
 # agent-feedback
 
 > **Tell your agent what it did wrong in less than 10 lines.**
-> A zero-dependency, framework-agnostic Python harness for LLM application validation and stateful feedback retries.
+> A zero-dependency, framework-agnostic Python harness for LLM output validation and stateful feedback retries.
 
 [![PyPI version](https://img.shields.io/pypi/v/agent-feedback.svg)](https://pypi.org/project/agent-feedback/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/agent-feedback.svg)](https://pypi.org/project/agent-feedback/)
@@ -34,9 +34,9 @@ result = await arun(
 
 That's the whole idea: **invoke, inspect, give feedback, retry.**
 
-`agent-feedback` is a small, framework-agnostic feedback loop around **any** LLM invocation callable - that `llm_invoke` is YOUR invokable.
+`agent-feedback` is a small, framework-agnostic feedback loop around _any_ LLM invocation callable - that `llm_invoke` is **YOUR** invokable.
 
-It doesn't replace your model SDK or agent framework. It doesn't know or care about invocation shapes. You define those shapes; the harness just runs the loop.
+It doesn't replace your model SDK or agent framework. It doesn't know or care about invocation output shapes. You define those shapes; the harness just runs the loop.
 
 ## Why?
 
@@ -72,51 +72,17 @@ def validate_flight_search(tool_call):
 
 The feedback becomes context for the next attempt.
 
-## The mental model
+## 99.99% isn't good enough
 
-```text
+Your agent probably isn't stupid. On a frontier model, a well-scoped tool call probably comes back correct 99.99% of the time.
 
- request
-    |
-    v
-  invoke
-    |
-    v
-  extract (optional)
-    |
-    v
-  validators
-    |
-    +-------> return None ---------> done
-    |
-    v
-  raise RetryableFailure
-    |
-    v
-  apply_feedback
-    |
-    v
-  request -------------> (back to top)
+That sounds fine until you multiply it out. At thousands of users running hundreds of thousands of agent steps a day, a 0.01% failure rate isn't an edge case anymore — it's a support queue. You can't fix this by prompting harder - you need **feedback**.
 
-```
+## Framework agnostic - plug and play _today_, no matter your SDK
 
-To remember the pipeline, note the stages **map directly to the `arun()` parameters, read top-to-bottom**:
+`agent-feedback` doesn't replace your model SDK or agent framework, and it doesn't know or care about invocation output shapes — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever.
 
-1. `request` — The argument or arguments passed to your invocation callable.
-2. `invoke` — The callable performing the actual execution/LLM call.
-3. `extract` (optional) — Post-processes the raw response into the target shape for validation.
-4. `validators` — A list of functions that evaluate the extracted output.
-5. `apply_feedback` — Dictates how the feedback transforms the original request for the next attempt.
-
-The output of one function flows naturally as the input to the next.
-
-For a step-by-step guide, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/getting_started.md).
-
-## Built to be spammable, no matter your existing SDK
-
-There's no adapter layer, so there's **almost no integration cost to wrapping every invoke() callsite in your app**, not just the risky ones.
-
-Your extractor and validators naturally adapt to whatever shape each SDK hands back — Anthropic's `.content` blocks, LangChain's `.tool_calls`, whatever. The core loop stays the same even when the SDK does not:
+This means if you work with _any_ invocation callables in your app, **you can immediately wrap them with `arun()` today at almost no integration cost:**
 
 ```python
 from agent_feedback import arun, Request
@@ -152,22 +118,56 @@ await arun(
 # Combine with Instructor
 instructor_client = instructor.from_provider("openai/gpt-4o-mini")
 await arun(
-    request=Request( 
+    request=Request(
         response_model=UserBaseModel,
         messages=[{"role": "user", "content": "John is 250 years old"}],
-    ), 
+    ),
     invoke=instructor_client.chat.completions.create,
     validators=[user_age_reasonable], # your own validator
 )
 ```
 
-> *Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`.*
+> _Request bundles `args` and `kwargs` for your invoke callable. It's unnecessary when your invoke takes a single argument. In `apply_feedback`, access them via `previous_request.args` and `previous_request.kwargs`._
 
-This cheapness compounds:
+## The mental model
 
-- **Reuse one pipeline everywhere.** Build it once with [Runner](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#reuse-one-pipeline-with-runner), then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
-- **Raise `RetryableFailure` from anywhere.** Not just validators — raise it inside `invoke` if a provider call produces a recoverable failure, or inside `extract` if parsing fails. The same loop handles it.
-- **Use validators as deterministic evals.** A `validator` essentially checks the correctness of an LLM output - which is a free eval. Attach one that records the output and returns `None`, and you can collect pass/fail or quality telemetry at every call site without changing your invocation code.
+The pipeline stages map directly to the `arun()` parameters, read top-to-bottom:
+
+```text
+
+ request
+    |
+    v
+  invoke
+    |
+    v
+  extract (optional)
+    |
+    v
+  validators
+    |
+    +-------> return None ---------> done
+    |
+    v
+  raise RetryableFailure
+    |
+    v
+  apply_feedback
+    |
+    v
+  request -------------> (back to top)
+
+```
+
+The output of one function flows naturally as the input to the next. That's it.
+
+Three things worth knowing up front:
+
+- If writing arun() everywhere in your codebase is tedious, build the pipeline once with a reusable object [Runner](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#reuse-one-pipeline-with-runner), then call it from every site that shares the same `invoke` / `extract` / `apply_feedback`.
+- You may [raise `RetryableFailure` from anywhere](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#raise-retryablefailure-from-anywhere-in-the-loop), not just validators, to short-curcuit the loop at any stage.
+- A `validator` essentially checks the correctness of an LLM output - which is a free deterministic eval! You can integrate an external callback by [using validators as eval hooks.](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/patterns.md#use-validators-as-deterministic-eval-hooks)
+
+For a step-by-step guide, see [Getting Started](https://github.com/scepticalsceptile/agent-feedback/blob/main/docs/Guides/getting_started.md).
 
 ## Why not just a while loop?
 
@@ -186,9 +186,11 @@ You can. That's essentially the core of `agent-feedback`.
 
 The value isn't in hiding a complicated algorithm. It's in providing a reusable abstraction around a pattern that tends to grow as your application needs more: extraction, multiple validators, structured failures, attempt history, exhaustion handling, and consistent retry behavior.
 
+This is especially pertinent for output validation. If your codebase has 10s of LLM output validators, you probably want a consistent way to handle them all, rather than a different loop for each one. Attempt history and request access within the pipeline stages are especially tedious to implement consistently across multiple loops.
+
 **If a five-line loop is all you need, write the five-line loop.**
 
-**If you're writing the same loop repeatedly, use `agent-feedback`.**
+**If you're checking LLM output repeatedly, use `agent-feedback`.**
 
 ## Scope
 
