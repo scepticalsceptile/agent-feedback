@@ -46,13 +46,14 @@ Notice arun doesn't care about invocation input, output, or message shapes - tha
 
 **When you need to check validity of LLM output across multiple instances in your codebase.**
 
-Modern agent harnesses may produce:
+Modern agent harnesses may produce
 
 - A command that is destructive or violates permissions.
 - Tool calls that are semantically incorrect - such as trying to cancel a task that has already been completed, or polling a subagent that has finished.
 - Tool calls that are structurally incorrect - such as when a required field is missing.
 - The same failing command runs multiple times with no change in approach.
-- An agent that stops working on a task even though it has a todo list with items still `pending`.
+
+and so on.
 
 Modern LLMs may not make these mistakes 99% of the time. But in production, over thousands of agentic steps, that 1% can compound quickly.
 
