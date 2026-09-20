@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 import agent_feedback._runner as runner_module
-
 from agent_feedback import (
     AttemptHistory,
     ExhaustedRetriesError,
@@ -76,8 +75,9 @@ async def test_arun_full_uses_default_extract_and_expands_request_envelope() -> 
 
 
 @pytest.mark.asyncio
-async def test_arun_full_retries_after_invoke_retryable_failure_using_failure_override(
-) -> None:
+async def test_arun_full_retries_after_retryable_failure_using_failure_override() -> (
+    None
+):
     failure = RetryableFailure(
         "retry invoke",
         feedback="repair request",
@@ -233,8 +233,9 @@ async def test_arun_full_rejects_max_attempts_less_than_one() -> None:
 
 
 @pytest.mark.asyncio
-async def test_arun_full_raises_missing_apply_feedback_error_without_retry_path(
-) -> None:
+async def test_arun_full_raises_missing_apply_feedback_error_without_retry_path() -> (
+    None
+):
     invokable = SequenceInvokable([FakeRawResponse(text="bad")])
 
     def validator(_output: str) -> None:
@@ -336,7 +337,9 @@ async def test_arun_reports_actual_failure_for_impossible_exhausted_state(
         ),
     ):
         await arun(
-            invoke=EchoInvokable(lambda request: FakeRawResponse(text=f"echo:{request}")),
+            invoke=EchoInvokable(
+                lambda request: FakeRawResponse(text=f"echo:{request}")
+            ),
             request="initial-request",
         )
 
