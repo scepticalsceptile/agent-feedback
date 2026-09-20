@@ -24,7 +24,6 @@ def validate_action_permissions(latest_output):
             "Agent action violated permissions",
             feedback=(
                 "Your attempted action violates your current permissions. "
-                "Ask the user to grant the necessary permission. "
                 "If the action is simple, ask the user to perform it instead."
             ),
         )
@@ -80,7 +79,7 @@ The pipeline stages map directly to the `arun()` parameters, read top-to-bottom:
     v
   raise RetryableFailure
     |
-    +-------> attempts remain -----> apply_feedback -----> next request
+    +-------> attempts remain -----> apply_feedback -----> new request (back to top)
     |
     +-------> no attempts remain --> stop
 ```
