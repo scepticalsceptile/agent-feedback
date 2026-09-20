@@ -31,8 +31,35 @@ result = await arun(
 )
 ```
 
-That calls `await model.ainvoke("Say hello in one short sentence.")` and
-returns its output.
+This calls
+
+```python
+await model.ainvoke("Say hello in one short sentence.")
+```
+
+underneath the hood and returns its output.
+
+If your invoke function expects more than one positional argument or uses named
+keyword arguments, wrap the call shape in `Request(...)`:
+
+```python
+from agent_feedback import Request, arun
+
+
+result = await arun(
+    request=Request(
+        input="Say hello in one short sentence.",
+        model="gpt-5.5",
+    ),
+    invoke=client.responses.create,
+)
+```
+
+Underneath the hood this will call:
+
+```python
+await client.responses.create(input="Say hello in one short sentence.", model="gpt-5.5")
+```
 
 ## Add extraction when your SDK returns a wrapper object
 
@@ -134,35 +161,6 @@ more examples, see [Use request-shaped feedback functions](./patterns.md#use-req
 
 Return a fresh request value from `apply_feedback(...)`. Do not mutate the
 existing request in place.
-
-## Use `Request(...)` when invoke needs exact args and kwargs
-
-If your invoke function expects more than one positional argument or uses named
-keyword arguments, wrap the call shape in `Request(...)`.
-
-```python
-from agent_feedback import Request, arun
-
-
-result = await arun(
-    request=Request(
-        input="Say hello.",
-        model="gpt-5.5",
-    ),
-    invoke=client.responses.create,
-    extract=lambda response: response.output_text,
-)
-```
-
-That makes the harness call:
-
-```python
-await client.responses.create(input="Say hello.", model="gpt-5.5")
-```
-
-If your invoke function already takes a single argument, you do not need
-`Request(...)`. If you do use it, that same envelope becomes `previous_request`
-inside `apply_feedback(...)`. See [request families](./api_reference.md#request-families).
 
 ## Use `Runner` when many call sites share the same defaults
 
